@@ -71,6 +71,7 @@ def run_training(
     viz_mode: str = "terminal",
     resume_from: Optional[str] = None,
     max_generations: Optional[int] = None,
+    use_batch: bool = False,
 ):
     """Run the neuroevolution training pipeline.
 
@@ -160,13 +161,21 @@ def run_training(
         print(f"\n--- Generation {gen + 1}/{cfg.num_generations} "
               f"({gen_elapsed:.0f}s elapsed) ---")
 
-        # evaluate population
-        scores = engine.evaluate_population(
-            env_class=env_class,
-            config=cfg if hasattr(cfg, 'sim_time_step') else None,
-            n_episodes=3,  # average over 3 episodes for stability
-            seed_offset=gen * 1000,
-        )
+        # evaluate population (batch mode = vectorized sim, ~10-50x faster)
+        if use_batch:
+            scores = engine.evaluate_population_batch(
+                n_agents_per_episode=min(cfg.population_size, 200),
+                max_steps_per_episode=cfg.sim_max_steps,
+                dt=cfg.sim_time_step,
+                seed_offset=gen * 1000,
+            )
+        else:
+            scores = engine.evaluate_population(
+                env_class=env_class,
+                config=cfg if hasattr(cfg, 'sim_time_step') else None,
+                n_episodes=3,  # average over 3 episodes for stability
+                seed_offset=gen * 1000,
+            )
 
         history = engine.get_history()
 
@@ -254,6 +263,8 @@ def parse_args():
                         default="terminal", help="Visualization backend")
     parser.add_argument("--resume", "-r", default=None, help="Path to checkpoint pickle to resume from")
     parser.add_argument("--generations", "-g", type=int, default=None, help="Override max generations")
+    parser.add_argument("--batch", action="store_true",
+                        help="Use batched (vectorized) evaluation — 10-50x faster for large populations")
     return parser.parse_args()
 
 
@@ -265,4 +276,5 @@ if __name__ == "__main__":
         viz_mode=args.viz,
         resume_from=args.resume,
         max_generations=args.generations,
+        use_batch=getattr(args, 'batch', False),
     )

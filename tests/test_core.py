@@ -76,6 +76,110 @@ class TestOrbitSimulator:
         assert done_count >= 0, "Episode should run without errors"
 
 
+class TestVectorizedOrbitSimulator:
+    """Tests for the vectorized (batched) orbital simulator."""
+
+    def test_reset_returns_batched_observation(self):
+        from ksp_neuro.sim_env.vectorized_sim import VectorizedOrbitSimulator
+        n = 50
+        sim = VectorizedOrbitSimulator(n_agents=n, seed=42)
+        obs = sim.reset()
+        assert isinstance(obs, np.ndarray), "reset() must return numpy array"
+        assert obs.shape == (n, 16), f"Expected shape ({n}, 16), got {obs.shape}"
+        assert not np.any(np.isnan(obs)), "Observation contains NaN values"
+
+    def test_step_returns_correct_shapes(self):
+        from ksp_neuro.sim_env.vectorized_sim import VectorizedOrbitSimulator
+        n = 50
+        sim = VectorizedOrbitSimulator(n_agents=n, seed=42)
+        obs = sim.reset()
+        actions = np.zeros((n, 8), dtype=np.float32)
+        result = sim.step(actions)
+        assert len(result) == 4, f"step() should return 4-tuple; got {len(result)} items"
+        obs_out, rewards, dones, info = result
+        assert obs_out.shape == (n, 16), f"Obs shape: {obs_out.shape}"
+        assert rewards.shape == (n,), f"Rewards shape: {rewards.shape}"
+        assert dones.shape == (n,), f"Dones shape: {dones.shape}"
+
+    def test_throttle_produces_motion(self):
+        from ksp_neuro.sim_env.vectorized_sim import VectorizedOrbitSimulator
+        n = 10
+        sim = VectorizedOrbitSimulator(n_agents=n, seed=42)
+        obs = sim.reset()
+        vel_before = np.linalg.norm(sim.vel[~sim.done_mask], axis=1).mean()
+
+        action = np.ones((n, 8), dtype=np.float32) * 0.5
+        action[:, 0] = 0.5  # throttle
+        for _ in range(10):
+            obs, rewards, dones, info = sim.step(action)
+
+        vel_after = np.linalg.norm(sim.vel[~sim.done_mask], axis=1).mean() if (~sim.done_mask).any() else vel_before
+        assert abs(vel_after - vel_before) > 0.5, f"Velocity should change: {vel_before:.2f} -> {vel_after:.2f}"
+
+    def test_all_agents_run_independently(self):
+        """Verify each agent has independent state."""
+        from ksp_neuro.sim_env.vectorized_sim import VectorizedOrbitSimulator
+        n = 5
+        sim = VectorizedOrbitSimulator(n_agents=n, seed=42)
+        obs = sim.reset()
+
+        # Give different throttle to each agent (use action index as throttle)
+        for step in range(50):
+            actions = np.zeros((n, 8), dtype=np.float32)
+            for i in range(n):
+                actions[i, 0] = (i + 1) * 0.1  # different throttle per agent
+            obs, rewards, dones, info = sim.step(actions)
+
+        # Agents with higher throttle should have traveled further
+        altitudes = np.array([info["max_altitude"][i] for i in range(n)])
+        assert all(altitudes[i] >= altitudes[i - 1] for i in range(1, n)), \
+            f"Higher throttle should give more altitude: {altitudes}"
+
+    def test_performance_benchmark(self):
+        """Verify vectorized sim is fast."""
+        from ksp_neuro.sim_env.vectorized_sim import VectorizedOrbitSimulator
+        import time
+
+        n = 200
+        steps = 100
+        sim = VectorizedOrbitSimulator(n_agents=n, max_steps=steps)
+        obs = sim.reset()
+        actions = np.ones((n, 8), dtype=np.float32) * 0.5
+
+        start = time.time()
+        for _ in range(steps):
+            obs, rewards, dones, info = sim.step(actions)
+        elapsed = time.time() - start
+
+        ticks_per_sec = n * steps / elapsed
+        assert ticks_per_sec > 10_000, f"Vectorized sim should be fast: {ticks_per_sec:.0f} ticks/sec"
+
+
+class TestBatchEnv:
+    """Tests for the batch environment wrapper."""
+
+    def test_batch_env_reset(self):
+        from ksp_neuro.sim_env.batch_env import BatchEnv
+        n = 50
+        env = BatchEnv(n_agents=n, max_steps_per_episode=100)
+        obs = env.reset()
+        assert obs.shape == (n, 16), f"Expected shape ({n}, 16), got {obs.shape}"
+        env.close()
+
+    def test_batch_env_step(self):
+        from ksp_neuro.sim_env.batch_env import BatchEnv
+        n = 50
+        env = BatchEnv(n_agents=n, max_steps_per_episode=3600)
+        obs = env.reset()
+        actions = np.ones((n, 8), dtype=np.float32) * 0.5
+
+        for _ in range(10):
+            obs, rewards, dones, info = env.step(actions)
+
+        assert not np.any(np.isnan(rewards)), "Rewards should not contain NaN"
+        env.close()
+
+
 class TestNeuroEvolutionEngine:
     """Tests for the neuroevolution engine."""
 
