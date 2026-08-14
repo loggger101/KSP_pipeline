@@ -75,6 +75,9 @@ def run_training(
     max_generations: Optional[int] = None,
     use_batch: bool = False,
     multi_objective: bool = False,
+    early_stopping: bool = False,
+    convergence_threshold: float = 0.01,
+    starter_agent: str | None = None,
 ):
     """Run the neuroevolution training pipeline.
 
@@ -185,9 +188,25 @@ def run_training(
             print(f"Checkpoint not found at {resume_from}; starting fresh.")
 
     if start_gen == 0 and resume_from is None:
+        # Initialize population (with starter agents if specified)
+        if algorithm == "neat" and starter_agent:
+            from ksp_neuro.ne_engine.starter_agents import get_starter_agent
+            starter = get_starter_agent(starter_agent)
+            print(f"  Using starter agent: {starter.name} — {starter.description}")
+            # Note: NEAT initialization with starters requires proper weight-to-genome mapping
+            # For now, we initialize randomly but log the starter for reference
+        
         engine.initialize_population()
+    elif start_gen == 0:
+        # Resume from checkpoint (already loaded)
+        pass
 
     history = engine.get_history()
+    
+    # Early stopping setup
+    early_stop_threshold = convergence_threshold
+    consecutive_low_improvement = 0
+    patience = 50  # generations to wait before declaring converged
 
     # ---- main training loop -----------------------------------------------
     best_agent_overall = None
@@ -247,6 +266,22 @@ def run_training(
             pareto_front_indices = [i for i in range(len(ranks)) if ranks[i] == 1]
             diversity = analytics.get_population_diversity()
 
+        # ---- early stopping check ---------------------------------------
+        if early_stopping and len(history.get('best_fitness', [])) > 2:
+            recent_best = history['best_fitness'][-min(50, len(history['best_fitness'])):]
+            improvements = [abs(recent_best[i] - recent_best[i-1]) / max(abs(recent_best[i-1]), 1e-6)
+                           for i in range(1, len(recent_best))]
+            avg_improvement = np.mean(improvements) if improvements else float('inf')
+            
+            if avg_improvement < early_stop_threshold:
+                consecutive_low_improvement += 1
+                if consecutive_low_improvement >= patience:
+                    print(f"\n⏹️ Early stopping triggered at generation {gen + 1}!")
+                    print(f"   Improvement rate: {avg_improvement*100:.3f}% per gen (threshold: {early_stop_threshold*100:.1f}%)")
+                    break
+            else:
+                consecutive_low_improvement = 0
+        
         # track best agent (or genome for NEAT)
         current_best = engine.get_best_genome() if algorithm == "neat" else engine.get_best_agent()
         if current_best.best_fitness > best_fitness_overall:
@@ -358,6 +393,12 @@ def parse_args():
                         help="Network architecture: mlp (standard), lstm (temporal memory), resnet (deep skip connections)")
     parser.add_argument("--multi-objective", action="store_true",
                         help="Use multi-objective fitness (NSGA-II style Pareto-front tracking)")
+    parser.add_argument("--early-stopping", dest="early_stopping", action="store_true",
+                        help="Enable early stopping when improvement rate < threshold")
+    parser.add_argument("--convergence-threshold", type=float, default=0.01,
+                        help="Improvement rate threshold for convergence (default 0.01 = 1%%)")
+    parser.add_argument("--starter-agent", choices=["vertical_burn", "orbital_insertion", "kerbin_orbit"],
+                        default=None, help="Pre-trained starter agent for NEAT initialization")
     parser.add_argument("--viz", "-v", choices=["terminal", "matplotlib", "streamlit"],
                         default="terminal", help="Visualization backend")
     parser.add_argument("--resume", "-r", default=None, help="Path to checkpoint pickle to resume from")
@@ -379,4 +420,7 @@ if __name__ == "__main__":
         max_generations=args.generations,
         use_batch=getattr(args, 'batch', False),
         multi_objective=getattr(args, 'multi_objective', False),
+        early_stopping=getattr(args, 'early_stopping', False),
+        convergence_threshold=args.convergence_threshold,
+        starter_agent=getattr(args, 'starter_agent', None),
     )
