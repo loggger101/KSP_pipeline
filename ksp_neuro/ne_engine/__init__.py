@@ -537,6 +537,9 @@ class NeuroEvolutionEngine:
 
 # Import action keys for batch evaluation
 from ksp_neuro.sim_env.vectorized_sim import _ACTION_KEYS  # noqa: E402
+# Re-export new architecture modules
+from ksp_neuro.ne_engine.lstm_net import LSTMNetwork, build_lstm_weights, forward_lstm  # noqa: E402
+from ksp_neuro.ne_engine.resnet import ResidualNetwork, build_residual_weights, forward_residual  # noqa: E402
 
 __all__ = [
     "NeuroEvolutionEngine",
@@ -544,4 +547,8 @@ __all__ = [
     "_build_network_weights",
     "_forward",
     "_output_activation",
+    "LSTMNetwork",
+    "ResidualNetwork",
+    "build_lstm_weights",
+    "build_residual_weights",
 ]

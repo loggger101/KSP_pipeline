@@ -68,6 +68,8 @@ def write_history_json(history: Dict[str, List[float]], path: str = "./logs/ksp_
 def run_training(
     config_path: Optional[str] = None,
     env_type: str = "sim",
+    algorithm: str = "ga",
+    network_type: str = "mlp",
     viz_mode: str = "terminal",
     resume_from: Optional[str] = None,
     max_generations: Optional[int] = None,
@@ -105,24 +107,43 @@ def run_training(
     print(f"  Algorithm   : {cfg.algorithm}")
     print(f"  Population  : {cfg.population_size} agents")
     print(f"  Generations : {cfg.num_generations}")
-    print(f"  Network     : input={cfg.input_size}, hidden={cfg.hidden_layers}, output={cfg.output_size}")
+    if network_type == "lstm":
+        print(f"  Network     : LSTM(input={cfg.input_size}, hidden={cfg.hidden_layers[0]}, output={cfg.output_size})")
+    elif network_type == "resnet":
+        print(f"  Network     : ResNet(input={cfg.input_size}, tower_widths={cfg.hidden_layers}, res_blocks=3, output={cfg.output_size})")
+    else:
+        print(f"  Network     : MLP(input={cfg.input_size}, hidden={cfg.hidden_layers}, output={cfg.output_size})")
     print(f"  Activation  : {cfg.activation}")
     print(f"  Viz mode    : {viz_mode}")
     print("=" * 70)
 
     # ---- initialize components --------------------------------------------
-    engine = NeuroEvolutionEngine(
-        input_size=cfg.input_size,
-        output_size=cfg.output_size,
-        hidden_layers=cfg.hidden_layers,
-        activation=cfg.activation,
-        population_size=cfg.population_size,
-        elite_ratio=cfg.elite_ratio,
-        crossover_rate=cfg.crossover_rate,
-        mutation_rate=cfg.mutation_rate,
-        mutation_strength=cfg.mutation_strength,
-        fitness_function=cfg.fitness_function,
-    )
+    if algorithm == "neat":
+        from ksp_neuro.ne_engine.neat import NEATEngine
+        
+        engine = NEATEngine(
+            input_size=cfg.input_size,
+            output_size=cfg.output_size,
+            population_size=cfg.population_size,
+            elite_ratio=cfg.elite_ratio,
+            mutation_rate=cfg.mutation_rate,
+            mutation_strength=cfg.mutation_strength,
+            crossover_rate=cfg.crossover_rate,
+        )
+        print(f"  Algorithm   : NEAT (topology evolving)")
+    else:
+        engine = NeuroEvolutionEngine(
+            input_size=cfg.input_size,
+            output_size=cfg.output_size,
+            hidden_layers=cfg.hidden_layers,
+            activation=cfg.activation,
+            population_size=cfg.population_size,
+            elite_ratio=cfg.elite_ratio,
+            crossover_rate=cfg.crossover_rate,
+            mutation_rate=cfg.mutation_rate,
+            mutation_strength=cfg.mutation_strength,
+            fitness_function=cfg.fitness_function,
+        )
 
     # viz backend
     viz = get_viz_backend(
@@ -170,17 +191,27 @@ def run_training(
                 seed_offset=gen * 1000,
             )
         else:
-            scores = engine.evaluate_population(
-                env_class=env_class,
-                config=cfg if hasattr(cfg, 'sim_time_step') else None,
-                n_episodes=3,  # average over 3 episodes for stability
-                seed_offset=gen * 1000,
-            )
+            if algorithm == "neat":
+                # NEAT needs genome → weights dict conversion for evaluation
+                from ksp_neuro.ne_engine.neat_eval import evaluate_genome
+                scores = engine.evaluate_population(
+                    eval_fn=evaluate_genome,
+                    env_class=env_class,
+                    config=cfg if hasattr(cfg, 'sim_time_step') else None,
+                    n_episodes=3,
+                )
+            else:
+                scores = engine.evaluate_population(
+                    env_class=env_class,
+                    config=cfg if hasattr(cfg, 'sim_time_step') else None,
+                    n_episodes=3,  # average over 3 episodes for stability
+                    seed_offset=gen * 1000,
+                )
 
         history = engine.get_history()
 
-        # track best agent
-        current_best = engine.get_best_agent()
+        # track best agent (or genome for NEAT)
+        current_best = engine.get_best_genome() if algorithm == "neat" else engine.get_best_agent()
         if current_best.best_fitness > best_fitness_overall:
             best_fitness_overall = current_best.best_fitness
             best_agent_overall = current_best
@@ -259,6 +290,10 @@ def parse_args():
     parser.add_argument("--config", "-c", default=None, help="Path to YAML config file")
     parser.add_argument("--env", "-e", choices=["sim", "ksp"], default="sim",
                         help="Environment type: sim (built-in) or ksp (live game)")
+    parser.add_argument("--algorithm", "-a", choices=["ga", "neat"], default="ga",
+                        help="Neuroevolution algorithm: ga (fixed architecture) or neat (topology evolves)")
+    parser.add_argument("--network", "-n", choices=["mlp", "lstm", "resnet"], default="mlp",
+                        help="Network architecture: mlp (standard), lstm (temporal memory), resnet (deep skip connections)")
     parser.add_argument("--viz", "-v", choices=["terminal", "matplotlib", "streamlit"],
                         default="terminal", help="Visualization backend")
     parser.add_argument("--resume", "-r", default=None, help="Path to checkpoint pickle to resume from")
@@ -273,6 +308,8 @@ if __name__ == "__main__":
     run_training(
         config_path=args.config,
         env_type=args.env,
+        algorithm=args.algorithm,
+        network_type=args.network,
         viz_mode=args.viz,
         resume_from=args.resume,
         max_generations=args.generations,
