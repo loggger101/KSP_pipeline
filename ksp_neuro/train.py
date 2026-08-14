@@ -74,6 +74,7 @@ def run_training(
     resume_from: Optional[str] = None,
     max_generations: Optional[int] = None,
     use_batch: bool = False,
+    multi_objective: bool = False,
 ):
     """Run the neuroevolution training pipeline.
 
@@ -153,6 +154,22 @@ def run_training(
         history_size=cfg.plot_history_size,
     )
 
+    # analytics tracking (always enabled)
+    from ksp_neuro.ne_engine.analytics import TrainingAnalytics
+    analytics = TrainingAnalytics(save_dir="./analytics")
+    
+    # multi-objective fitness evaluator
+    multi_obj_fn = None
+    if multi_objective:
+        from ksp_neuro.ne_engine.multi_obj import MultiObjectiveFitness
+        multi_obj_fn = MultiObjectiveFitness(
+            objectives=["apoapsis", "circularity", "fuel_efficiency"],
+            weights=[3.0, 2.0, 1.5],
+            normalize=True,
+            crowding_distance=True,
+        )
+        print(f"  Multi-objective: enabled (Pareto-front tracking)")
+
     # environment class
     env_class = OrbitSimulator  # default; swap for KSPInterface if needed
 
@@ -210,6 +227,26 @@ def run_training(
 
         history = engine.get_history()
 
+        # ---- record analytics data ----------------------------------------
+        network_stats = {}
+        if hasattr(engine, 'history') and 'avg_nodes' in engine.history:
+            avg_n = engine.history['avg_nodes'][-1] if len(engine.history['avg_nodes']) > 0 else 0
+            avg_c = engine.history.get('avg_connections', [0])[-1] if len(engine.history.get('avg_connections', [])) > 0 else 0
+            network_stats = {"avg_nodes": float(avg_n), "avg_connections": float(avg_c)}
+        
+        analytics.record_generation(
+            generation=gen + 1,
+            fitness_scores=list(scores),
+            network_stats=network_stats,
+            num_species=len(engine._species) if hasattr(engine, '_species') else 0,
+        )
+
+        # ---- multi-objective processing (if enabled) ----------------------
+        if multi_obj_fn and scores:
+            ranks, distances = multi_obj_fn.evaluate(scores)
+            pareto_front_indices = [i for i in range(len(ranks)) if ranks[i] == 1]
+            diversity = analytics.get_population_diversity()
+
         # track best agent (or genome for NEAT)
         current_best = engine.get_best_genome() if algorithm == "neat" else engine.get_best_agent()
         if current_best.best_fitness > best_fitness_overall:
@@ -260,10 +297,35 @@ def run_training(
             print("Shutting down...")
             break
 
-    # ---- final save -------------------------------------------------------
+    # ---- analytics summary ------------------------------------------------
+    curve = analytics.get_learning_curve()
+    
     print("\n" + "=" * 70)
     print(f"Training complete! {cfg.num_generations - start_gen} generations.")
     print(f"Best ever fitness: {best_fitness_overall:.4f}")
+    
+    # Convergence analysis
+    if curve.is_converged:
+        print(f"Convergence detected at generation {curve.convergence_generation}")
+        print(f"  Final improvement rate: {curve.avg_improvement_rate*100:.3f}% per gen")
+    else:
+        recent_slope = curve.trend_slope
+        if abs(recent_slope) > 0.01:
+            print(f"Training still improving: slope={recent_slope:+.4f} fitness/gen")
+        else:
+            print("Fitness plateaued — consider early stopping or increasing population")
+    
+    # Top generations
+    top_gens = analytics.get_best_generations(5)
+    if top_gens:
+        print(f"\nTop 5 generations by best fitness:")
+        for i, rec in enumerate(top_gens):
+            print(f"  #{i+1}: Gen {rec.generation} — Best: {rec.best_fitness:.2f}, Mean: {rec.mean_fitness:.2f}")
+    
+    # Pareto front summary (if multi-objective)
+    if multi_obj_fn:
+        pareto = analytics.get_population_diversity()
+        print(f"\nPareto-front diversity index: {pareto:.4f}")
 
     if best_agent_overall is not None:
         ckpt_dir = Path(cfg.checkpoint_dir)
@@ -294,6 +356,8 @@ def parse_args():
                         help="Neuroevolution algorithm: ga (fixed architecture) or neat (topology evolves)")
     parser.add_argument("--network", "-n", choices=["mlp", "lstm", "resnet"], default="mlp",
                         help="Network architecture: mlp (standard), lstm (temporal memory), resnet (deep skip connections)")
+    parser.add_argument("--multi-objective", action="store_true",
+                        help="Use multi-objective fitness (NSGA-II style Pareto-front tracking)")
     parser.add_argument("--viz", "-v", choices=["terminal", "matplotlib", "streamlit"],
                         default="terminal", help="Visualization backend")
     parser.add_argument("--resume", "-r", default=None, help="Path to checkpoint pickle to resume from")
@@ -314,4 +378,5 @@ if __name__ == "__main__":
         resume_from=args.resume,
         max_generations=args.generations,
         use_batch=getattr(args, 'batch', False),
+        multi_objective=getattr(args, 'multi_objective', False),
     )
