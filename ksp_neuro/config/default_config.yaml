@@ -1,0 +1,72 @@
+# =============================================================================
+# KSP Neuroevolution Pipeline — Default Configuration
+# =============================================================================
+
+# ---- Environment Selection --------------------------------------------------
+environment:
+  type: "sim"                    # "sim" (built-in) or "ksp" (live game via KRPC)
+  sim:
+    time_step: 0.1               # seconds per simulation step
+    max_steps_per_episode: 3600   # ~10 min at 0.1s steps
+    gravity_constant: 6.674e-11
+    earth_radius_m: 6_000_000    # simplified KSP Earth (Kerbin) radius in m
+    kerbin_mass_kg: 8.738e22
+    atmosphere_enabled: true
+    atmospheric_model: "exponential"
+    sea_level_pressure_pa: 90_000
+    scale_height_m: 5_600
+    seed: 42
+  ksp:
+    host: "localhost"
+    port: 6767                   # default KRPC server port
+
+# ---- Neuroevolution Engine --------------------------------------------------
+ne_engine:
+  algorithm: "ga"                # "ga", "neat", or "custom"
+  population_size: 200           # number of agents per generation
+  num_generations: 500
+  elite_ratio: 0.1               # fraction preserved unchanged each gen
+  crossover_rate: 0.8            # probability of crossover for each pair
+  mutation_rate: 0.3             # per-gene mutation probability
+  mutation_strength: 0.1         # std-dev multiplier for Gaussian noise
+  fitness_function: "distance"   # "distance", "altitude", "custom"
+  tournament_size: 5             # for tournament selection
+  elitism: true
+
+# ---- Neural Network Architecture --------------------------------------------
+network:
+  input_size: 16                 # number of observation features
+  output_size: 8                 # number of control outputs
+  hidden_layers: [64, 64]        # layer widths (list)
+  activation: "relu"             # "relu", "tanh", "sigmoid", "elu"
+  use_bias: true
+
+# ---- KSP Interface ----------------------------------------------------------
+ksp_interface:
+  krpc_host: "localhost"
+  krpc_port: 6767
+  connection_timeout_s: 10.0
+  action_groups:
+    - " RCS "
+    - " Main "
+    - " Abort "
+    - " Stage "
+    - " Gear "
+    - " Brakes "
+    - " Lights "
+    - " SAS "
+  parts_to_monitor: []           # list of part names to watch; empty = all
+
+# ---- Visualization ----------------------------------------------------------
+viz:
+  dashboard_port: 8501           # Streamlit / Gradio port
+  update_interval_s: 2.0         # seconds between metric updates
+  plot_history_size: 100         # rolling window for live plots
+  save_checkpoint_every_n: 50    # generations between checkpoints
+
+# ---- Logging & Checkpointing ------------------------------------------------
+logging:
+  level: "INFO"                  # DEBUG, INFO, WARNING, ERROR
+  log_dir: "./logs"
+  checkpoint_dir: "./checkpoints"
+  save_best_only: true           # only keep the single best model

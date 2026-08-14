@@ -1,0 +1,21 @@
+# =============================================================================
+# KSP Neuroevolution Pipeline — Dependencies
+# =============================================================================
+# Core dependencies (minimum versions):
+numpy>=1.24.0          # numerical operations, vectorized physics
+pyyaml>=6.0            # YAML config loading
+
+# Visualization (install as needed):
+streamlit>=1.30.0      # web-based real-time dashboard
+plotly>=5.18.0         # interactive charts for Streamlit
+matplotlib>=3.7.0      # optional matplotlib backend (pip install matplotlib)
+
+# Live KSP game interface:
+krpc-client            # kRPC Python client for live KSP (see https://github.com/krpc/krpc)
+
+# Testing:
+pytest>=7.0.0          # test runner
+
+# Optional — GPU acceleration / deep learning:
+torch>=2.0.0           # PyTorch (optional, for future NN backend swap)
+pygad>=3.2.0           # genetic algorithm library (optional, alternative engine)

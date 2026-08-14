@@ -1,0 +1,17 @@
+# Generated / runtime artifacts
+checkpoints/
+logs/
+*.pkl
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.mypy_cache/
+
+# Test config (not needed for production)
+ksp_neuro/config/test_config.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
