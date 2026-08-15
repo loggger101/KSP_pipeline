@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "ksp-neuroevolution"
+version = "1.2.0"
+description = "Genetic/evolutionary neural network pipeline for Kerbal Space Program training and evaluation"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+dependencies = [
+    "torch>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "krpc>=0.5.3",
+    "streamlit>=1.28",
+    "plotly>=5.15",
+    "pandas>=2.0",
+    "tqdm>=4.65",
+    "ray[default]>=2.6",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.3",
+    "pytest-cov>=4.1",
+    "black>=23.0",
+    "flake8>=6.0",
+    "mypy>=1.0",
+]
+
+[project.scripts]
+ksp-train = "ksp_neuro.train:main"
+ksp-dashboard = "ksp_neuro.viz.analytics_dashboard:main"
+
+[tool.setuptools.packages.find]
+include = ["ksp_neuro*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311", "py312", "py313"]
